@@ -35,3 +35,13 @@ po/stamp-po
 stamp-h1
 .deps/
 *.o
+
+.pc/
+debian/autoreconf.after
+debian/autoreconf.before
+debian/files
+debian/minidlna
+debian/minidlna.debhelper.log
+debian/minidlna.substvars
+debian/.debhelper
+linux/minidlna.init.d.script
