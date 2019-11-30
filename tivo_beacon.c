@@ -47,6 +47,7 @@
 #include <sys/poll.h>
 #include <netdb.h>
 
+#include "event.h"
 #include "tivo_beacon.h"
 #include "upnpglobalvars.h"
 #include "log.h"
@@ -109,18 +110,21 @@ getBcastAddress(void)
 	uint32_t ret = INADDR_BROADCAST;
 
 	s = socket(PF_INET, SOCK_STREAM, 0);
+	if (!s)
+		return ret;
 	memset(&ifc, '\0', sizeof(ifc));
 	ifc.ifc_len = sizeof(ifr);
 	ifc.ifc_req = ifr;
 
-	if(ioctl(s, SIOCGIFCONF, &ifc) < 0) {
+	if (ioctl(s, SIOCGIFCONF, &ifc) < 0)
+	{
 		DPRINTF(E_ERROR, L_TIVO, "Error getting interface list [%s]\n", strerror(errno));
 		close(s);
 		return ret;
 	}
 
 	count = ifc.ifc_len / sizeof(struct ifreq);
-	for(i = 0; i < count; i++)
+	for (i = 0; i < count; i++)
 	{
 		memcpy(&addr, &ifr[i].ifr_addr, sizeof(addr));
 		if(strcmp(inet_ntoa(addr.sin_addr), lan_addr[0].str) == 0)
@@ -149,21 +153,22 @@ getBcastAddress(void)
 void
 sendBeaconMessage(int fd, struct sockaddr_in * client, int len, int broadcast)
 {
-	char * mesg;
-	int mesg_len;
+	char msg[512];
+	int msg_len;
 
-	mesg_len = asprintf(&mesg, "TiVoConnect=1\n"
-	                           "swversion=1.0\n"
-	                           "method=%s\n"
-	                           "identity=%s\n"
-	                           "machine=%s\n"
-	                           "platform=pc/minidlna\n"
-	                           "services=TiVoMediaServer:%d/http\n",
-	                           broadcast ? "broadcast" : "connected",
-	                           uuidvalue, friendly_name, runtime_vars.port);
+	msg_len = snprintf(msg, sizeof(msg), "TiVoConnect=1\n"
+	                                     "swversion=1.0\n"
+	                                     "method=%s\n"
+	                                     "identity=%s\n"
+	                                     "machine=%s\n"
+	                                     "platform=pc/minidlna\n"
+	                                     "services=TiVoMediaServer:%d/http\n",
+	                                     broadcast ? "broadcast" : "connected",
+	                                     uuidvalue, friendly_name, runtime_vars.port);
+	if (msg_len < 0)
+		return;
 	DPRINTF(E_DEBUG, L_TIVO, "Sending TiVo beacon to %s\n", inet_ntoa(client->sin_addr));
-	sendto(fd, mesg, mesg_len, 0, (struct sockaddr*)client, len);
-	free(mesg);
+	sendto(fd, msg, msg_len, 0, (struct sockaddr*)client, len);
 }
 
 /*
@@ -172,24 +177,24 @@ sendBeaconMessage(int fd, struct sockaddr_in * client, int len, int broadcast)
  *
  * Returns true if this was a broadcast beacon msg
  */
-int
-rcvBeaconMessage(char * beacon)
+static int
+rcvBeaconMessage(char *beacon)
 {
-	char * tivoConnect = NULL;
-	char * method = NULL;
-	char * identity = NULL;
-	char * machine = NULL;
-	char * platform = NULL;
-	char * services = NULL;
-	char * cp;
-	char * scp;
-	char * tokptr;
+	char *tivoConnect = NULL;
+	char *method = NULL;
+	char *identity = NULL;
+	char *machine = NULL;
+	char *platform = NULL;
+	char *services = NULL;
+	char *cp;
+	char *scp;
+	char *tokptr;
 
 	cp = strtok_r(beacon, "=\r\n", &tokptr);
 	while( cp != NULL )
 	{
 		scp = cp;
-		cp = strtok_r( NULL, "=\r\n", &tokptr );
+		cp = strtok_r(NULL, "=\r\n", &tokptr);
 		if( strcasecmp(scp, "tivoconnect") == 0 )
 			tivoConnect = cp;
 		else if( strcasecmp(scp, "method") == 0 )
@@ -205,12 +210,12 @@ rcvBeaconMessage(char * beacon)
 		cp = strtok_r(NULL, "=\r\n", &tokptr);
 	}
 
-	if( tivoConnect == NULL )
+	if( !tivoConnect || !platform || !method )
 		return 0;
 
 #ifdef DEBUG
-	static struct aBeacon* topBeacon = NULL;
-	struct aBeacon * b;
+	static struct aBeacon *topBeacon = NULL;
+	struct aBeacon *b;
 	time_t current;
 	int len;
 	char buf[32];
@@ -284,15 +289,16 @@ rcvBeaconMessage(char * beacon)
 	return 0;
 }
 
-void ProcessTiVoBeacon(int s)
+void ProcessTiVoBeacon(struct event *ev)
 {
-	int n;
+	int s, n;
 	char *cp;
 	struct sockaddr_in sendername;
 	socklen_t len_r;
 	char bufr[1500];
 	len_r = sizeof(struct sockaddr_in);
 
+	s = ev->fd;
 	/* We only expect to see beacon msgs from TiVo's and possibly other tivo servers */
 	n = recvfrom(s, bufr, sizeof(bufr), 0,
 	             (struct sockaddr *)&sendername, &len_r);

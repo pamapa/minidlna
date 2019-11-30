@@ -32,6 +32,8 @@
 	" xmlns:dlna=\"urn:schemas-dlna-org:metadata-1-0/\""
 #define PV_NAMESPACE \
 	" xmlns:pv=\"http://www.pv.com/pvns/\""
+#define SEC_NAMESPACE \
+	" xmlns:sec=\"http://www.sec.co.kr/dlna\""
 
 struct Response
 {
@@ -49,12 +51,6 @@ struct Response
  * this method executes the requested Soap Action */
 void
 ExecuteSoapAction(struct upnphttp *, const char *, int);
-
-/* SoapError():
- * sends a correct SOAP error with an UPNPError code and 
- * description */
-void
-SoapError(struct upnphttp * h, int errCode, const char * errDesc);
 
 #endif
 

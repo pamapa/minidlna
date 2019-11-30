@@ -3,7 +3,7 @@
  * http://sourceforge.net/projects/minidlna/
  *
  * MiniDLNA media server
- * Copyright (C) 2008-2009  Justin Maggard
+ * Copyright (C) 2008-2017  Justin Maggard
  *
  * This file is part of MiniDLNA.
  *
@@ -52,11 +52,12 @@
 #include <time.h>
 
 #include "minidlnatypes.h"
+#include "clients.h"
 #include "config.h"
 
 #include <sqlite3.h>
 
-#define MINIDLNA_VERSION "1.1.0-cvs"
+#define MINIDLNA_VERSION "1.2.1"
 
 #ifdef NETGEAR
 # define SERVER_NAME "ReadyDLNA"
@@ -64,19 +65,21 @@
 # define SERVER_NAME "MiniDLNA"
 #endif
 
-#define CLIENT_CACHE_SLOTS 20
 #define USE_FORK 1
-#define DB_VERSION 8
+#define DB_VERSION 11
+
+#ifdef READYNAS
+# define LOGFILE_NAME "upnp-av.log"
+#else
+# define LOGFILE_NAME "minidlna.log"
+#endif
 
 #ifdef ENABLE_NLS
 #define _(string) gettext(string)
 #else
 #define _(string) (string)
 #endif
-
-#ifndef PNPX
-#define PNPX 0
-#endif
+#define THISORNUL(s) (s ? s : "")
 
 #define RESOURCE_PROTOCOL_INFO_VALUES \
 	"http-get:*:image/jpeg:DLNA.ORG_PN=JPEG_TN," \
@@ -168,6 +171,7 @@
 	"http-get:*:audio/mp4:*," \
 	"http-get:*:audio/x-wav:*," \
 	"http-get:*:audio/x-flac:*," \
+	"http-get:*:audio/x-dsd:*," \
 	"http-get:*:application/ogg:*"
 
 #define DLNA_FLAG_DLNA_V1_5      0x00100000
@@ -188,51 +192,56 @@ extern uint32_t runtime_flags;
 #define TIVO_MASK             0x0002
 #define DLNA_STRICT_MASK      0x0004
 #define NO_PLAYLIST_MASK      0x0008
+#define SYSTEMD_MASK          0x0010
+#define MERGE_MEDIA_DIRS_MASK 0x0020
+#define WIDE_LINKS_MASK       0x0040
+#ifdef HAVE_AVAHI
+#define TIVO_BONJOUR_MASK     0x0080
+#else
+#define TIVO_BONJOUR_MASK     0x0000
+#endif
+#define SCANNING_MASK         0x0100
+#define RESCAN_MASK           0x0200
+#define SUBTITLES_MASK        0x0400
+#define FORCE_ALPHASORT_MASK  0x0800
 
 #define SETFLAG(mask)	runtime_flags |= mask
-#define GETFLAG(mask)	runtime_flags & mask
+#define GETFLAG(mask)	(runtime_flags & mask)
 #define CLEARFLAG(mask)	runtime_flags &= ~mask
 
-extern const char * pidfilename;
+extern const char *pidfilename;
 
 extern char uuidvalue[];
 
-#define MODELNAME_MAX_LEN (64)
+#define MODELNAME_MAX_LEN 64
 extern char modelname[];
 
-#define MODELNUMBER_MAX_LEN (16)
+#define MODELNUMBER_MAX_LEN 16
 extern char modelnumber[];
 
-#define SERIALNUMBER_MAX_LEN (16)
+#define SERIALNUMBER_MAX_LEN 16
 extern char serialnumber[];
 
-#define PRESENTATIONURL_MAX_LEN (64)
+#define PRESENTATIONURL_MAX_LEN 64
 extern char presentationurl[];
 
-#if PNPX
-extern char pnpx_hwid[];
-#endif
-
 /* lan addresses */
-/* MAX_LAN_ADDR : maximum number of interfaces
- * to listen to SSDP traffic */
-#define MAX_LAN_ADDR (4)
 extern int n_lan_addr;
 extern struct lan_addr_s lan_addr[];
+extern int sssdp;
 
-extern const char * minissdpdsocketpath;
+extern const char *minissdpdsocketpath;
 
 /* UPnP-A/V [DLNA] */
 extern sqlite3 *db;
-#define FRIENDLYNAME_MAX_LEN (64)
+#define FRIENDLYNAME_MAX_LEN 64
 extern char friendly_name[];
-extern char db_path[];
-extern char log_path[];
-extern struct media_dir_s * media_dirs;
-extern struct album_art_name_s * album_art_names;
-extern struct client_cache_s clients[CLIENT_CACHE_SLOTS];
-extern short int scanning;
+extern char db_path[1024];
+extern char log_path[1024];
+extern struct media_dir_s *media_dirs;
+extern struct album_art_name_s *album_art_names;
 extern volatile short int quitting;
 extern volatile uint32_t updateID;
+extern const char *force_sort_criteria;
 
 #endif

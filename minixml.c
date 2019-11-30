@@ -30,6 +30,7 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 */
 #include "minixml.h"
+#include "upnpreplyparse.h"
 
 /* parseatt : used to parse the argument list
  * return 0 (false) in case of success and -1 (true) if the end
@@ -142,7 +143,7 @@ void parseelt(struct xmlparser * p)
 						return;
 					while( IS_WHITE_SPACE(*p->xml) )
 					{
-						p->xml++;
+						i++; p->xml++;
 						if (p->xml >= p->xmlend)
 							return;
 					}
@@ -152,8 +153,11 @@ void parseelt(struct xmlparser * p)
 						if (p->xml >= p->xmlend)
 							return;
 					}
-					if(i>0 && p->datafunc)
-						p->datafunc(p->data, data, i);
+					if (p->datafunc)
+					{
+						if (i > 0 || (p->flags & XML_STORE_EMPTY_FL))
+							p->datafunc(p->data, data, i);
+					}
 				}
 			}
 			else if(*p->xml == '/')

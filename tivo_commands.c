@@ -24,6 +24,7 @@
 #include <time.h>
 #include <sys/stat.h>
 
+#include "event.h"
 #include "tivo_utils.h"
 #include "upnpglobalvars.h"
 #include "upnphttp.h"
@@ -32,10 +33,10 @@
 #include "sql.h"
 #include "log.h"
 
-void
-SendRootContainer(struct upnphttp * h)
+static void
+SendRootContainer(struct upnphttp *h)
 {
-	char * resp;
+	char *resp;
 	int len;
 
 	len = xasprintf(&resp, "<?xml version='1.0' encoding='UTF-8' ?>\n"
@@ -93,52 +94,76 @@ SendRootContainer(struct upnphttp * h)
 	SendResp_upnphttp(h);
 }
 
-char *
-unescape_tag(char * tag)
+static void
+SendFormats(struct upnphttp *h, const char *sformat)
 {
-	modifyString(tag, "&amp;amp;", "&amp;", 0);
-	modifyString(tag, "&amp;amp;lt;", "&lt;", 0);
-	modifyString(tag, "&amp;lt;", "&lt;", 0);
-	modifyString(tag, "&amp;amp;gt;", "&gt;", 0);
-	modifyString(tag, "&amp;gt;", "&gt;", 0);
+	char *resp;
+	int len;
+
+	len = xasprintf(&resp, "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+			"<TiVoFormats>"
+			 "<Format>"
+			   "<ContentType>video/x-tivo-mpeg</ContentType>"
+			   "<Description/>"
+			 "</Format>"
+			 "<Format>"
+			   "<ContentType>%s</ContentType>"
+			   "<Description/>"
+			 "</Format>"
+			"</TiVoFormats>", sformat);
+	BuildResp_upnphttp(h, resp, len);
+	free(resp);
+	SendResp_upnphttp(h);
+}
+
+static char *
+tivo_unescape_tag(char *tag)
+{
+	modifyString(tag, "&amp;amp;", "&amp;", 1);
+	modifyString(tag, "&amp;amp;lt;", "&lt;", 1);
+	modifyString(tag, "&amp;lt;", "&lt;", 1);
+	modifyString(tag, "&amp;amp;gt;", "&gt;", 1);
+	modifyString(tag, "&amp;gt;", "&gt;", 1);
+	modifyString(tag, "&amp;quot;", "&quot;", 1);
 	return tag;
 }
 
 #define FLAG_SEND_RESIZED  0x01
 #define FLAG_NO_PARAMS     0x02
 #define FLAG_VIDEO         0x04
-int callback(void *args, int argc, char **argv, char **azColName)
+static int
+callback(void *args, int argc, char **argv, char **azColName)
 {
 	struct Response *passed_args = (struct Response *)args;
 	char *id = argv[0], *class = argv[1], *detailID = argv[2], *size = argv[3], *title = argv[4], *duration = argv[5],
              *bitrate = argv[6], *sampleFrequency = argv[7], *artist = argv[8], *album = argv[9], *genre = argv[10],
-             *comment = argv[11], *date = argv[12], *resolution = argv[13], *mime = argv[14], *path = argv[15];
+             *comment = argv[11], *date = argv[12], *resolution = argv[13], *mime = argv[14];
 	struct string_s *str = passed_args->str;
 
 	if( strncmp(class, "item", 4) == 0 )
 	{
 		int flags = 0;
-		unescape_tag(title);
+		tivo_unescape_tag(title);
 		if( strncmp(mime, "audio", 5) == 0 )
 		{
 			flags |= FLAG_NO_PARAMS;
 			strcatf(str, "<Item><Details>"
-			             "<ContentType>audio/*</ContentType>"
+			             "<ContentType>%s</ContentType>"
 			             "<SourceFormat>%s</SourceFormat>"
-			             "<SourceSize>%s</SourceSize>"
-			             "<SongTitle>%s</SongTitle>", mime, size, title);
+			             "<SourceSize>%s</SourceSize>",
+			             "audio/*", mime, size);
+			strcatf(str, "<SongTitle>%s</SongTitle>", title);
 			if( date )
-			{
 				strcatf(str, "<AlbumYear>%.*s</AlbumYear>", 4, date);
-			}
 		}
 		else if( strcmp(mime, "image/jpeg") == 0 )
 		{
 			flags |= FLAG_SEND_RESIZED;
 			strcatf(str, "<Item><Details>"
-			             "<ContentType>image/*</ContentType>"
-			             "<SourceFormat>image/jpeg</SourceFormat>"
-			             "<SourceSize>%s</SourceSize>", size);
+			             "<ContentType>%s</ContentType>"
+			             "<SourceFormat>%s</SourceFormat>"
+			             "<SourceSize>%s</SourceSize>",
+			             "image/*", mime, size);
 			if( date )
 			{
 				struct tm tm;
@@ -148,29 +173,22 @@ int callback(void *args, int argc, char **argv, char **azColName)
 				strcatf(str, "<CaptureDate>0x%X</CaptureDate>", (unsigned int)mktime(&tm));
 			}
 			if( comment )
-			{
 				strcatf(str, "<Caption>%s</Caption>", comment);
-			}
 		}
 		else if( strncmp(mime, "video", 5) == 0 )
 		{
 			char *episode;
-			flags |= FLAG_NO_PARAMS;
 			flags |= FLAG_VIDEO;
 			strcatf(str, "<Item><Details>"
-			             "<ContentType>video/x-tivo-mpeg</ContentType>"
+			             "<ContentType>%s</ContentType>"
 			             "<SourceFormat>%s</SourceFormat>"
-			             "<SourceSize>%s</SourceSize>", mime, size);
+			             "<SourceSize>%s</SourceSize>",
+			             mime, mime, size);
 			episode = strstr(title, " - ");
 			if( episode )
 			{
-				strcatf(str, "<Title>%.*s</Title>"
-				             "<EpisodeTitle>%s</EpisodeTitle>", 
-				             (int)(episode-title), title, episode+3);
-			}
-			else
-			{
-				strcatf(str, "<Title>%s</Title>", title);
+				strcatf(str, "<EpisodeTitle>%s</EpisodeTitle>", episode+3);
+				*episode = '\0';
 			}
 			if( date )
 			{
@@ -181,23 +199,21 @@ int callback(void *args, int argc, char **argv, char **azColName)
 				strcatf(str, "<CaptureDate>0x%X</CaptureDate>", (unsigned int)mktime(&tm));
 			}
 			if( comment )
-			{
-				strcatf(str, "<Description>%s</Description>", comment);
-			}
+				strcatf(str, "<Description>%s</Description>", tivo_unescape_tag(comment));
 		}
 		else
 		{
 			return 0;
 		}
-		strcatf(str, "<Title>%s</Title>", unescape_tag(title));
+		strcatf(str, "<Title>%s</Title>", title);
 		if( artist ) {
-			strcatf(str, "<ArtistName>%s</ArtistName>", unescape_tag(artist));
+			strcatf(str, "<ArtistName>%s</ArtistName>", tivo_unescape_tag(artist));
 		}
 		if( album ) {
-			strcatf(str, "<AlbumTitle>%s</AlbumTitle>", unescape_tag(album));
+			strcatf(str, "<AlbumTitle>%s</AlbumTitle>", tivo_unescape_tag(album));
 		}
 		if( genre ) {
-			strcatf(str, "<MusicGenre>%s</MusicGenre>", unescape_tag(genre));
+			strcatf(str, "<MusicGenre>%s</MusicGenre>", tivo_unescape_tag(genre));
 		}
 		if( resolution ) {
 			char *width = strsep(&resolution, "x");
@@ -216,27 +232,23 @@ int callback(void *args, int argc, char **argv, char **azColName)
 		if( sampleFrequency ) {
 			strcatf(str, "<SourceSampleRate>%s</SourceSampleRate>", sampleFrequency);
 		}
-		strcatf(str, "</Details><Links><Content>"
-		             "<ContentType>%s</ContentType>"
-		             "<Url>/%s/%s.dat</Url>%s</Content>",
+		strcatf(str, "</Details><Links>"
+		             "<Content>"
+		               "<ContentType>%s</ContentType>"
+		               "<Url>/%s/%s.%s</Url>%s"
+		             "</Content>",
 		             mime,
-		             (flags & FLAG_SEND_RESIZED)?"Resized":"MediaItems", detailID,
-		             (flags & FLAG_NO_PARAMS)?"<AcceptsParams>No</AcceptsParams>":"");
+		             (flags & FLAG_SEND_RESIZED) ? "Resized" : "MediaItems",
+		             detailID, mime_to_ext(mime),
+		             (flags & FLAG_NO_PARAMS) ? "<AcceptsParams>No</AcceptsParams>" : "");
 		if( flags & FLAG_VIDEO )
 		{
-			char *esc_name = escape_tag(basename(path), 1);
 			strcatf(str, "<CustomIcon>"
-			               "<ContentType>video/*</ContentType>"
+			               "<ContentType>image/*</ContentType>"
 			               "<Url>urn:tivo:image:save-until-i-delete-recording</Url>"
-			             "</CustomIcon>"
-			             "<Push><Container>Videos</Container></Push>"
-			             "<File>%s</File> </Links>", esc_name);
-			free(esc_name);
+			             "</CustomIcon>");
 		}
-		else
-		{
-			strcatf(str, "</Links>");
-		}
+		strcatf(str, "</Links>");
 	}
 	else if( strncmp(class, "container", 9) == 0 )
 	{
@@ -246,7 +258,7 @@ int callback(void *args, int argc, char **argv, char **azColName)
 		count = sql_get_int_field(db, "SELECT count(*) from OBJECTS where PARENT_ID = '%s'", id);
 #else
 		count = sql_get_int_field(db, "SELECT count(*) from OBJECTS o left join DETAILS d on (d.ID = o.DETAIL_ID) where PARENT_ID = '%s' and "
-		                              " (MIME in ('image/jpeg', 'audio/mpeg', 'video/mpeg', 'video/x-tivo-mpeg')"
+		                              " (MIME in ('image/jpeg', 'audio/mpeg', 'video/mpeg', 'video/x-tivo-mpeg', 'video/x-tivo-mpeg-ts')"
 		                              " or CLASS glob 'container*')", id);
 #endif
 		strcatf(str, "<Item>"
@@ -262,7 +274,7 @@ int callback(void *args, int argc, char **argv, char **azColName)
 		                 "<ContentType>x-tivo-container/folder</ContentType>"
 		               "</Content>"
 		             "</Links>",
-		             unescape_tag(title), count, id);
+		             tivo_unescape_tag(title), count, id);
 	}
 	strcatf(str, "</Item>");
 
@@ -273,10 +285,10 @@ int callback(void *args, int argc, char **argv, char **azColName)
 
 #define SELECT_COLUMNS "SELECT o.OBJECT_ID, o.CLASS, o.DETAIL_ID, d.SIZE, d.TITLE," \
 	               " d.DURATION, d.BITRATE, d.SAMPLERATE, d.ARTIST, d.ALBUM, d.GENRE," \
-	               " d.COMMENT, d.DATE, d.RESOLUTION, d.MIME, d.PATH, d.DISC, d.TRACK "
+	               " d.COMMENT, d.DATE, d.RESOLUTION, d.MIME, d.DISC, d.TRACK "
 
-void
-SendItemDetails(struct upnphttp * h, sqlite_int64 item)
+static void
+SendItemDetails(struct upnphttp *h, int64_t item)
 {
 	char *sql;
 	char *zErrMsg = NULL;
@@ -293,7 +305,7 @@ SendItemDetails(struct upnphttp * h, sqlite_int64 item)
 	args.requested = 1;
 	xasprintf(&sql, SELECT_COLUMNS
 	               "from OBJECTS o left join DETAILS d on (d.ID = o.DETAIL_ID)"
-		       " where o.DETAIL_ID = %lld group by o.DETAIL_ID", item);
+		       " where o.DETAIL_ID = %lld group by o.DETAIL_ID", (long long)item);
 	DPRINTF(E_DEBUG, L_TIVO, "%s\n", sql);
 	ret = sqlite3_exec(db, sql, callback, (void *) &args, &zErrMsg);
 	free(sql);
@@ -309,9 +321,9 @@ SendItemDetails(struct upnphttp * h, sqlite_int64 item)
 	SendResp_upnphttp(h);
 }
 
-void
-SendContainer(struct upnphttp * h, const char * objectID, int itemStart, int itemCount, char * anchorItem,
-              int anchorOffset, int recurse, char * sortOrder, char * filter, unsigned long int randomSeed)
+static void
+SendContainer(struct upnphttp *h, const char *objectID, int itemStart, int itemCount, char *anchorItem,
+              int anchorOffset, int recurse, char *sortOrder, char *filter, unsigned long int randomSeed)
 {
 	char *resp = malloc(262144);
 	char *sql, *item, *saveptr;
@@ -379,7 +391,7 @@ SendContainer(struct upnphttp * h, const char * objectID, int itemStart, int ite
 	}
 	else
 	{
-		item = sql_get_text_field(db, "SELECT NAME from OBJECTS where OBJECT_ID = '%s'", objectID);
+		item = sql_get_text_field(db, "SELECT NAME from OBJECTS where OBJECT_ID = '%q'", objectID);
 		if( item )
 		{
 			title = escape_tag(item, 1);
@@ -391,12 +403,12 @@ SendContainer(struct upnphttp * h, const char * objectID, int itemStart, int ite
 
 	if( recurse )
 	{
-		xasprintf(&which, "OBJECT_ID glob '%s$*'", objectID);
+		which = sqlite3_mprintf("OBJECT_ID glob '%q$*'", objectID);
 		strcpy(groupBy, "group by DETAIL_ID");
 	}
 	else
 	{
-		xasprintf(&which, "PARENT_ID = '%s'", objectID);
+		which = sqlite3_mprintf("PARENT_ID = '%q'", objectID);
 	}
 
 	if( sortOrder )
@@ -533,7 +545,7 @@ SendContainer(struct upnphttp * h, const char * objectID, int itemStart, int ite
 			}
 			else if( strncasecmp(item, "video", 5) == 0 )
 			{
-				strcat(myfilter, "MIME in ('video/mpeg', 'video/x-tivo-mpeg')");
+				strcat(myfilter, "MIME in ('video/mpeg', 'video/x-tivo-mpeg', 'video/x-tivo-mpeg-ts')");
 			}
 			else
 			{
@@ -550,7 +562,7 @@ SendContainer(struct upnphttp * h, const char * objectID, int itemStart, int ite
 	}
 	else
 	{
-		strcpy(myfilter, "MIME in ('image/jpeg', 'audio/mpeg', 'video/mpeg', 'video/x-tivo-mpeg') or CLASS glob 'container*'");
+		strcpy(myfilter, "MIME in ('image/jpeg', 'audio/mpeg', 'video/mpeg', 'video/x-tivo-mpeg', 'video/x-tivo-mpeg-ts') or CLASS glob 'container*'");
 	}
 
 	if( anchorItem )
@@ -616,8 +628,8 @@ SendContainer(struct upnphttp * h, const char * objectID, int itemStart, int ite
 		DPRINTF(E_ERROR, L_HTTP, "SQL error: %s\n", zErrMsg);
 		sqlite3_free(zErrMsg);
 		Send500(h);
+		sqlite3_free(which);
 		free(title);
-		free(which);
 		free(resp);
 		return;
 	}
@@ -638,21 +650,21 @@ SendContainer(struct upnphttp * h, const char * objectID, int itemStart, int ite
 	memcpy(str.data, &str_buf, ret);
 	str.size = str.off+ret;
 	free(title);
-	free(which);
+	sqlite3_free(which);
 	BuildResp_upnphttp(h, str.data, str.size);
 	free(resp);
 	SendResp_upnphttp(h);
 }
 
 void
-ProcessTiVoCommand(struct upnphttp * h, const char * orig_path)
+ProcessTiVoCommand(struct upnphttp *h, const char *orig_path)
 {
 	char *path;
 	char *key, *val;
 	char *saveptr = NULL, *item;
 	char *command = NULL, *container = NULL, *anchorItem = NULL;
-	char *sortOrder = NULL, *filter = NULL;
-	sqlite_int64 detailItem=0;
+	char *sortOrder = NULL, *filter = NULL, *sformat = NULL;
+	int64_t detailItem=0;
 	int itemStart=0, itemCount=-100, anchorOffset=0, recurse=0;
 	unsigned long int randomSeed=0;
 
@@ -717,6 +729,10 @@ ProcessTiVoCommand(struct upnphttp * h, const char * orig_path)
 			if( val )
 				detailItem = strtoll(basename(val), NULL, 10);
 		}
+		else if( strcasecmp(key, "SourceFormat") == 0 )
+		{
+			sformat = val;
+		}
 		else if( strcasecmp(key, "Format") == 0 || // Only send XML
 		         strcasecmp(key, "SerialNum") == 0 || // Unused for now
 		         strcasecmp(key, "DoGenres") == 0 ) // Not sure what this is, so ignore it
@@ -744,12 +760,17 @@ ProcessTiVoCommand(struct upnphttp * h, const char * orig_path)
 			}
 			else
 			{
-				SendContainer(h, container, itemStart, itemCount, anchorItem, anchorOffset, recurse, sortOrder, filter, randomSeed);
+				SendContainer(h, container, itemStart, itemCount, anchorItem,
+				              anchorOffset, recurse, sortOrder, filter, randomSeed);
 			}
 		}
 		else if( strcmp(command, "QueryItem") == 0 )
 		{
 			SendItemDetails(h, detailItem);
+		}
+		else if( strcmp(command, "QueryFormats") == 0 )
+		{
+			SendFormats(h, sformat);
 		}
 		else
 		{
