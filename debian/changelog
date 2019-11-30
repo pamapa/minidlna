@@ -1,3 +1,12 @@
+minidlna (1.2.1+pamapa-1) unstable; urgency=medium
+
+  * New upstream release.
+  * 04-reload-log-file-on-SIGUSR2.patch removed: fixed upstream.
+  * 10-db_dir-should-not-affect-log_dir.patch removed: fixed upstream.
+  * debian/patches refreshed.
+
+ -- Patrick Ammann <pammann@gmx.net>  Sun, 01 Dec 2019 14:09:22 +0300
+
 minidlna (1.2.1+dfsg-1) unstable; urgency=medium
 
   * New upstream release.
