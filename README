@@ -29,5 +29,18 @@ Prerequisites
 - libsqlite3
 - libavformat (the ffmpeg libraries)
 
+Installation on Debian GNU/Linux:
+==================
+
+    $  git clone https://github.com/pamapa/minidlna.git
+    $  cd minidlna
+    $  apt-get install autopoint debhelper dh-autoreconf
+    $  apt-get install libsqlite3-dev  libavcodec-dev libavformat-dev libavutil-dev
+    $  apt-get install libexif-dev libflac-dev libid3tag0-dev libjpeg-dev libogg-dev libvorbis-dev
+    $  apt-get install inkscape libatk-adaptor libgail-common imagemagick
+    $  ./debian/extra/make_icons.sh ./debian/extra/openlogo-nd.svg > icons.c
+    $  dpkg-buildpackage -b -uc
+    $  cd ..
+    $  sudo dpkg -i minidlna_*.deb
 
 Justin Maggard
